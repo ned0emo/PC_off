@@ -17,35 +17,90 @@ namespace PC_off
 {
     public partial class Form1 : Form
     {
-        private Dictionary<string, List<string>> firstBuildingComps;
-        private Dictionary<string, List<string>> sevenBuildingComps;
-
         private bool isCompsLoading;
-        private bool isNotepadRunning;
 
         private int completeCounter;
 
+        List<Button> offAllButtons;
+        List<Button> refreshButtons;
+
         public Form1()
         {
-            isNotepadRunning = false;
             isCompsLoading = false;
             completeCounter = 0;
 
-            firstBuildingComps = new Dictionary<string, List<string>>();
-            sevenBuildingComps = new Dictionary<string, List<string>>();
+            offAllButtons = new List<Button>();
+            refreshButtons = new List<Button>();
 
             InitializeComponent();
 
-            changeAllButtonStatus(false);
-
-            loadCompsList("1", firstBuildingComps, firstBuildingTab, refreshFirstCompsButton, firstBuildingOffButton);
-            loadCompsList("7", sevenBuildingComps, sevenBuildingTab, refreshSevenCompsButton, sevenBuildingOffButton);
+            ChangeAllButtonStatus(false);
+            LoadBuildings();
         }
 
-        private async void loadCompsList(string building, Dictionary<string, List<string>> buildingsComps, TabPage tab, Button refreshButton, Button offAllButton)
+        private async void LoadBuildings()
         {
             isCompsLoading = true;
-            string domainName = await loadDomainName();
+            string[] files = { };
+
+            try
+            {
+                await Task.Run(() => { files = Directory.GetFiles(".\\"); });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show($"Ошибка получения списка файлов. {ex.Message}", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+
+            var buildings = files.Where(file => Regex.IsMatch(file, "\\\\\\d+\\.txt$"));
+
+            if(!buildings.Any())
+            {
+                MessageBox.Show($"Не найдены файлы с данными об аудиториях.", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
+            }
+
+            foreach (var building in buildings)
+            {
+                var comp = building.Substring(building.IndexOf('\\') + 1);
+                compsTextBox.Text += $"{comp} ";
+
+                LoadCompsList(comp, buildings.Count());
+            }
+        }
+
+        private async void LoadCompsList(string building, int count)
+        {
+            var buildingsComps = new Dictionary<string, List<string>>();
+
+            var tab = new TabPage
+            {
+                Text = building.Replace(".txt", "") + " корпус"
+            };
+
+            var refreshButton = new Button
+            {
+                Text = "Обновить",
+                Location = new Point(125, 6),
+                Enabled = false,
+            };
+            refreshButtons.Add(refreshButton);
+
+            var offAllButton = new Button
+            {
+                Text = "Всё выделенное",
+                Location = new Point(6, 6),
+                Size = new Size(113, 23),
+                Enabled = false,
+            };
+            offAllButtons.Add(offAllButton);
+
+            tab.Controls.Add(refreshButton);
+            tab.Controls.Add(offAllButton);
+
+            tabControl1.Controls.Add(tab);
+
+            isCompsLoading = true;
+            string domainName = await LoadDomainName();
 
             var buttonList = new List<Button>();
             var taskList = new List<Task>();
@@ -55,7 +110,7 @@ namespace PC_off
 
             try
             {
-                sr = new StreamReader($"./{building}.txt");
+                sr = new StreamReader($"./{building}");
                 var file = await sr.ReadToEndAsync();
                 sr.Close();
 
@@ -108,7 +163,7 @@ namespace PC_off
 
                     foreach (CheckBox cb in checkBoxList)
                     {
-                        taskList.Add(checkPing(cb));
+                        taskList.Add(CheckPing(cb));
                     }
 
                     ///
@@ -172,16 +227,20 @@ namespace PC_off
                 isCompsLoading = true;
                 taskList.Clear();
                 foreach (var button in buttonList) button.Enabled = false;
+                offAllButton.Enabled = false;
+                refreshButton.Enabled = false;
 
                 foreach (var cb in fullBuildingCheckBoxList)
                 {
                     cb.Enabled = false;
-                    taskList.Add(checkPing(cb));
+                    taskList.Add(CheckPing(cb));
                 }
 
                 foreach (var task in taskList) await task;
                 foreach (var button in buttonList) button.Enabled = true;
 
+                offAllButton.Enabled = true;
+                refreshButton.Enabled = true;
                 isCompsLoading = false;
             };
 
@@ -215,13 +274,13 @@ namespace PC_off
             isCompsLoading = false;
             completeCounter++;
 
-            if (completeCounter > 1)
+            if (completeCounter >= count)
             {
-                changeAllButtonStatus(true);
+                ChangeAllButtonStatus(true);
             }
         }
 
-        private async Task<string> loadDomainName()
+        private async Task<string> LoadDomainName()
         {
             string tmp = "";
             StreamReader sr = null;
@@ -239,13 +298,13 @@ namespace PC_off
             return tmp;
         }
 
-        private async Task checkPing(CheckBox cb)
+        private async Task CheckPing(CheckBox cb)
         {
             var ping = new Ping();
 
             try
             {
-                if ((await ping.SendPingAsync(cb.Text, 2)).Status == IPStatus.Success)
+                if ((await ping.SendPingAsync(cb.Text, 3)).Status == IPStatus.Success)
                 {
                     cb.AutoCheck = true;
                     cb.Checked = true;
@@ -253,6 +312,7 @@ namespace PC_off
                 }
                 else
                 {
+                    cb.Checked = false;
                     cb.AutoCheck = false;
                     cb.ForeColor = Color.Red;
                 }
@@ -261,52 +321,25 @@ namespace PC_off
             {
                 cb.AutoCheck = false;
                 cb.ForeColor = Color.Red;
+                cb.Checked = false;
             }
 
             cb.Enabled = true;
         }
 
-        private void delayTextBox_TextChanged(object sender, EventArgs e) => delayTextBox.Text = Regex.Replace(delayTextBox.Text, "\\D+", "");
+        private void DelayTextBox_TextChanged(object sender, EventArgs e) => delayTextBox.Text = Regex.Replace(delayTextBox.Text, "\\D+", "");
 
-        private void firstBuildingButton_Click(object sender, EventArgs e) => editClassrooms("1");
-
-        private void sevenBuildingButton_Click(object sender, EventArgs e) => editClassrooms("7");
-
-        private void editClassrooms(string fileName)
+        private void ChangeAllButtonStatus(bool enabled)
         {
-            if (isNotepadRunning) return;
-            isNotepadRunning = true;
-
-            Task.Run(new Action(() =>
+            foreach (var button in offAllButtons)
             {
-                try
-                {
-                    using (Process pProcess = new Process())
-                    {
-                        pProcess.StartInfo.FileName = @"notepad";
-                        pProcess.StartInfo.Arguments = Application.StartupPath + $"/{fileName}.txt";
-                        pProcess.Start();
-                        pProcess.WaitForExit();
+                button.Enabled = enabled;
+            }
 
-                        isNotepadRunning = false;
-                    }
-                }
-                catch (Exception ex)
-                {
-                    isNotepadRunning = false;
-                    MessageBox.Show($"Ошибка открытия блокнота\n{ex.Message}", "Ошибка", MessageBoxButtons.OK, MessageBoxIcon.Error);
-                }
-            }));
-        }
-
-        private void changeAllButtonStatus(bool enabled)
-        {
-            firstBuildingEditButton.Enabled = enabled;
-            sevenBuildingEditButton.Enabled = enabled;
-            refreshFirstCompsButton.Enabled = enabled;
-            refreshSevenCompsButton.Enabled = enabled;
-            firstBuildingOffButton.Enabled = enabled;
-            sevenBuildingOffButton.Enabled = enabled;
+            foreach (var button in refreshButtons)
+            {
+                button.Enabled = enabled;
+            }
         }
     }
 }
